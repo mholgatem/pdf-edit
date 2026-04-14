@@ -9,6 +9,12 @@ const ICON_PDF  = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20
 const ICON_DRAG = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="5"  r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="19" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="5"  r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="19" r="1" fill="currentColor" stroke="none"/></svg>`;
 const ICON_X    = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
 
+// ── PDF.js worker config ──────────────────────────────────────────────────────
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
 // ── Cookie helpers ────────────────────────────────────────────────────────────
 function getCookie(name) {
   const entry = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith(name + '='));
@@ -270,7 +276,7 @@ let splitPageCount = 0;
 let splits         = [];   // { id, startPage, endPage, name }
 let splitNextId    = 0;
 
-const MAX_SPLITS = 15;
+const MAX_SPLITS = 25;
 
 function setupSplit() {
   const dropzone  = document.getElementById('split-dropzone');
@@ -297,6 +303,7 @@ function setupSplit() {
 
   document.getElementById('split-clear-btn').addEventListener('click', clearSplitFile);
   document.getElementById('split-add-btn').addEventListener('click', addSplit);
+  document.getElementById('split-auto-btn').addEventListener('click', autoSplit);
   document.getElementById('split-run-btn').addEventListener('click', runSplit);
 }
 
@@ -324,6 +331,7 @@ async function loadSplitFile(file) {
 
   renderSplitCards();
   addSplit(); // auto-create first split
+  document.getElementById('split-auto-btn').disabled = false;
 }
 
 function clearSplitFile() {
@@ -334,6 +342,7 @@ function clearSplitFile() {
   document.getElementById('split-dropzone').classList.remove('hidden');
   document.getElementById('split-file-bar').classList.add('hidden');
   document.getElementById('split-editor').classList.add('hidden');
+  document.getElementById('split-auto-btn').disabled = true;
 }
 
 function defaultSplitName(startPage, endPage) {
@@ -485,6 +494,180 @@ async function runSplit() {
   } finally {
     hideLoading();
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  AUTO SPLIT
+// ══════════════════════════════════════════════════════════════════════════════
+
+function sanitizeTitle(title) {
+  return title
+    .replace(/[<>:"/\\|?*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+async function autoSplit() {
+  if (!splitFile) return;
+
+  if (typeof pdfjsLib === 'undefined') {
+    alert('PDF.js failed to load. Check your internet connection and try again.');
+    return;
+  }
+
+  showLoading('Scanning for chapters…');
+  setProgress(5, 'Loading PDF…');
+  await tick();
+
+  try {
+    const arrayBuffer = await splitFile.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    // Tier 1: outline/bookmarks
+    setProgress(15, 'Checking PDF outline…');
+    await tick();
+    let chapters = await tryOutline(pdf);
+
+    // Tier 2: text + font-size heuristic
+    if (!chapters) {
+      setProgress(25, 'Scanning page text…');
+      await tick();
+      chapters = await tryTextScan(pdf);
+    }
+
+    // Nothing found
+    if (!chapters || chapters.length === 0) {
+      hideLoading();
+      alert(chapters === null
+        ? 'No chapter text found. This may be a scanned (image-only) PDF.'
+        : 'No chapter headings detected in this PDF.');
+      return;
+    }
+
+    // Truncate to MAX_SPLITS
+    let truncated = false;
+    if (chapters.length > MAX_SPLITS) {
+      chapters  = chapters.slice(0, MAX_SPLITS);
+      truncated = true;
+    }
+
+    // Build splits array
+    setProgress(95, 'Building splits…');
+    await tick();
+
+    splits      = [];
+    splitNextId = 0;
+
+    chapters.forEach((ch, i) => {
+      const startPage = ch.page;
+      const endPage   = chapters[i + 1] ? chapters[i + 1].page - 1 : splitPageCount;
+      const id        = ++splitNextId;
+      const safe      = ch.title ? sanitizeTitle(ch.title) : '';
+      splits.push({ id, startPage, endPage, name: safe ? safe + '.pdf' : defaultSplitName(startPage, endPage) });
+    });
+
+    setProgress(100, 'Done!');
+    await tick();
+    renderSplitCards();
+
+    if (truncated) {
+      setTimeout(() => alert(`Showing first ${MAX_SPLITS} chapters. Additional chapters were truncated.`), 100);
+    }
+
+  } catch (err) {
+    console.error('Auto Split error:', err);
+    alert('Auto Split failed: ' + err.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+// ── Tier 1: PDF outline/bookmarks ─────────────────────────────────────────────
+async function tryOutline(pdf) {
+  try {
+    const outline = await pdf.getOutline();
+    if (!outline || outline.length === 0) return undefined;
+
+    const chapters = [];
+    for (const item of outline) {
+      try {
+        let dest = item.dest;
+        // Named destination (string) must be resolved first
+        if (typeof dest === 'string') dest = await pdf.getDestination(dest);
+        if (!Array.isArray(dest) || !dest[0]) continue;
+        const pageIndex = await pdf.getPageIndex(dest[0]);
+        chapters.push({ title: item.title || null, page: pageIndex + 1 });
+      } catch {
+        continue; // malformed destination — skip item
+      }
+    }
+
+    chapters.sort((a, b) => a.page - b.page);
+    // Need ≥2 items to be useful
+    return chapters.length >= 2 ? chapters : undefined;
+
+  } catch {
+    return undefined;
+  }
+}
+
+// ── Tier 2: text pattern + font-size heuristic ────────────────────────────────
+const HEADING_REGEX  = /^(chapter|part|section|unit|book|appendix|prologue|epilogue|introduction|conclusion)\s+(\d+|[ivxlcdm]+|[a-z]+)/i;
+const NUMBERED_REGEX = /^\d+\.\s+[A-Z]/;
+
+async function tryTextScan(pdf) {
+  const chapters  = [];
+  let totalItems  = 0;
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    // Yield every 5 pages to keep the UI responsive
+    if (p % 5 === 0 || p === pdf.numPages) {
+      setProgress(25 + (p / pdf.numPages) * 65, `Scanning page ${p} of ${pdf.numPages}…`);
+      await tick();
+    }
+
+    try {
+      const page    = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const items   = content.items.filter(i => i.str.trim().length > 0);
+      totalItems   += items.length;
+      if (!items.length) continue;
+
+      // Median font height across all items on this page
+      const heights = items.map(i => Math.abs(i.transform[3])).sort((a, b) => a - b);
+      const median  = heights[Math.floor(heights.length / 2)];
+
+      // Full page text for keyword matching (first 200 chars is enough)
+      const pageText = items.map(i => i.str).join(' ').trim().slice(0, 200);
+
+      const matchesKeyword = HEADING_REGEX.test(pageText) || NUMBERED_REGEX.test(pageText);
+
+      // Top-of-page items (highest y-coordinate in PDF space)
+      const topItems = [...items]
+        .sort((a, b) => b.transform[5] - a.transform[5])
+        .slice(0, 3);
+
+      const hasLargeFont = topItems.some(i => median > 0 && Math.abs(i.transform[3]) >= median * 1.4);
+
+      // Chapter page: keyword match, OR large heading font on a sparse page
+      if (matchesKeyword || (hasLargeFont && items.length < 30)) {
+        const title = matchesKeyword
+          ? pageText.slice(0, 80)
+          : (topItems[0]?.str.trim().slice(0, 80) || null);
+        chapters.push({ title, page: p });
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // null = scanned PDF (no text at all); [] = text present but no headings found
+  if (totalItems === 0) return null;
+
+  chapters.sort((a, b) => a.page - b.page);
+  // Deduplicate consecutive detections on the same page
+  return chapters.filter((ch, i) => i === 0 || ch.page !== chapters[i - 1].page);
 }
 
 // ── Escape HTML (used in template literals) ───────────────────────────────────
