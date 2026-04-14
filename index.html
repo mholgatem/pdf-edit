@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Tools</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="light">
+
+  <header>
+    <div class="header-inner">
+      <button class="back-btn" id="back-btn" aria-label="Back to home">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <div class="logo" id="logo">
+        <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="var(--accent)" fill="var(--accent-light)"/>
+          <polyline points="14 2 14 8 20 8" stroke="var(--accent)"/>
+          <line x1="16" y1="13" x2="8" y2="13" stroke="var(--accent)"/>
+          <line x1="16" y1="17" x2="8" y2="17" stroke="var(--accent)"/>
+        </svg>
+        <span>PDF Tools</span>
+      </div>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle light/dark mode"></button>
+    </div>
+  </header>
+
+  <!-- ═══════════════ LANDING ═══════════════ -->
+  <div id="view-landing" class="view active">
+    <div class="hero">
+      <h1>PDF Tools</h1>
+      <p class="hero-sub">Simple, private PDF editing — runs entirely in your browser. No uploads, no accounts.</p>
+    </div>
+    <div class="card-grid">
+
+      <button class="feature-card" id="btn-go-combine" type="button">
+        <div class="card-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="8" height="11" rx="1.5"/>
+            <rect x="14" y="3" width="8" height="11" rx="1.5"/>
+            <path d="M6 14v3l6 4 6-4v-3"/>
+            <line x1="12" y1="10" x2="12" y2="21"/>
+          </svg>
+        </div>
+        <div class="card-text">
+          <h2>Combine PDFs</h2>
+          <p>Merge multiple PDFs into a single document in any order.</p>
+        </div>
+        <span class="card-cta">Get started →</span>
+      </button>
+
+      <button class="feature-card" id="btn-go-split" type="button">
+        <div class="card-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/>
+            <line x1="20" y1="4" x2="8.12" y2="15.88"/>
+            <line x1="14.47" y1="14.48" x2="20" y2="20"/>
+            <line x1="8.12" y1="8.12" x2="12" y2="12"/>
+          </svg>
+        </div>
+        <div class="card-text">
+          <h2>Split PDF</h2>
+          <p>Extract page ranges from a PDF into separate files.</p>
+        </div>
+        <span class="card-cta">Get started →</span>
+      </button>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════ COMBINE VIEW ═══════════════ -->
+  <div id="view-combine" class="view hidden">
+    <div class="section-header">
+      <h2>Combine PDFs</h2>
+      <p>Upload PDFs, drag to reorder, then merge into one document.</p>
+    </div>
+
+    <div id="combine-dropzone" class="dropzone" role="button" tabindex="0" aria-label="Drop PDF files here or click to browse">
+      <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" class="dz-icon">
+        <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+      </svg>
+      <p class="dz-title">Drop PDF files here</p>
+      <p class="dz-sub">or</p>
+      <button type="button" class="btn btn-outline" id="combine-pick-btn">Browse Files</button>
+      <input type="file" id="combine-input" accept=".pdf" multiple aria-hidden="true">
+    </div>
+
+    <ul id="combine-list" class="file-list" aria-label="PDFs to combine"></ul>
+
+    <div id="combine-footer" class="footer-bar hidden">
+      <div class="outname-row">
+        <label for="combine-outname">Output filename</label>
+        <input type="text" id="combine-outname" value="combined.pdf" spellcheck="false" autocomplete="off">
+      </div>
+      <button type="button" class="btn btn-primary" id="combine-run-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Combine &amp; Download
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══════════════ SPLIT VIEW ═══════════════ -->
+  <div id="view-split" class="view hidden">
+    <div class="section-header">
+      <h2>Split PDF</h2>
+      <p>Upload a PDF, define page ranges, then download as a zip.</p>
+    </div>
+
+    <div id="split-dropzone" class="dropzone" role="button" tabindex="0" aria-label="Drop a PDF file here or click to browse">
+      <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" class="dz-icon">
+        <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+      </svg>
+      <p class="dz-title">Drop a PDF here</p>
+      <p class="dz-sub">or</p>
+      <button type="button" class="btn btn-outline" id="split-pick-btn">Browse File</button>
+      <input type="file" id="split-input" accept=".pdf" aria-hidden="true">
+    </div>
+
+    <div id="split-file-bar" class="file-bar hidden">
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="pdf-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <div class="file-bar-info">
+        <span class="file-bar-name" id="split-fname"></span>
+        <span class="file-bar-meta" id="split-fmeta"></span>
+      </div>
+      <button type="button" class="btn-icon btn-remove" id="split-clear-btn" aria-label="Remove file">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div id="split-editor" class="split-editor hidden">
+      <div id="split-cards" class="split-cards"></div>
+
+      <div class="split-btn-row">
+        <button type="button" class="btn btn-outline" id="split-add-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Split
+        </button>
+        <div class="tooltip-wrap">
+          <button type="button" class="btn btn-outline coming-soon" id="split-auto-btn" disabled>
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Auto Split
+          </button>
+          <span class="tooltip">Coming soon — will detect chapter breaks automatically</span>
+        </div>
+      </div>
+
+      <div class="split-run-row">
+        <button type="button" class="btn btn-primary" id="split-run-btn" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download as ZIP
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ LOADING OVERLAY ═══════════════ -->
+  <div id="loading-overlay" class="overlay hidden" role="status" aria-live="assertive" aria-label="Processing">
+    <div class="overlay-card">
+      <div class="spinner"></div>
+      <p class="loader-title" id="loader-title">Processing…</p>
+      <p class="loader-sub" id="loader-sub">Please wait</p>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <p class="progress-pct" id="progress-pct">0%</p>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
