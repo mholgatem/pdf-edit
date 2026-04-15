@@ -68,6 +68,20 @@
         <span class="card-cta">Get started →</span>
       </button>
 
+      <button class="feature-card" id="btn-go-modify" type="button">
+        <div class="card-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </div>
+        <div class="card-text">
+          <h2>Modify PDF</h2>
+          <p>Repaginate long documents or add interactive form fields.</p>
+        </div>
+        <span class="card-cta">Get started →</span>
+      </button>
+
     </div>
   </div>
 
@@ -156,6 +170,193 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- ═══════════════ MODIFY SUB-LANDING ═══════════════ -->
+  <div id="view-modify" class="view hidden">
+    <div class="section-header">
+      <h2>Modify PDF</h2>
+      <p>Choose a modification tool.</p>
+    </div>
+    <div class="card-grid">
+
+      <button class="feature-card" id="btn-go-repaginate" type="button">
+        <div class="card-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="9" rx="1"/>
+            <rect x="14" y="3" width="7" height="9" rx="1"/>
+            <rect x="3" y="15" width="7" height="6" rx="1"/>
+            <rect x="14" y="15" width="7" height="6" rx="1"/>
+          </svg>
+        </div>
+        <div class="card-text">
+          <h2>Repaginate</h2>
+          <p>Slice a tall single-page PDF into standard-sized pages for printing.</p>
+        </div>
+        <span class="card-cta">Get started →</span>
+      </button>
+
+      <button class="feature-card" id="btn-go-forms" type="button">
+        <div class="card-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <line x1="7" y1="10" x2="11" y2="10"/>
+            <line x1="7" y1="14" x2="15" y2="14"/>
+            <rect x="15" y="8.5" width="3.5" height="3" rx="0.5"/>
+          </svg>
+        </div>
+        <div class="card-text">
+          <h2>Form Editor</h2>
+          <p>Add interactive form fields to any PDF and save with AcroForms support.</p>
+        </div>
+        <span class="card-cta">Get started →</span>
+      </button>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════ REPAGINATE VIEW ═══════════════ -->
+  <div id="view-repaginate" class="view view--wide hidden">
+
+    <div class="repag-toolbar" id="repag-toolbar">
+      <!-- Drop zone (shown before file is loaded) -->
+      <div class="toolbar-dz-wrap" id="repag-dz-wrap">
+        <div class="toolbar-dropzone" id="repag-dropzone" role="button" tabindex="0" aria-label="Drop a PDF here or click to browse">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          <span>Drop PDF or</span>
+          <button type="button" class="btn btn-outline btn-sm" id="repag-pick-btn">Browse</button>
+          <input type="file" id="repag-input" accept=".pdf" aria-hidden="true">
+        </div>
+      </div>
+      <!-- Controls (shown after file is loaded) -->
+      <div class="repag-controls hidden" id="repag-controls">
+        <div class="repag-file-chip">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span id="repag-fname"></span>
+          <button type="button" class="btn-icon btn-remove" id="repag-clear-btn" aria-label="Remove file">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="repag-ctrl-group repag-page-pick hidden" id="repag-page-pick">
+          <label for="repag-src-page">Source page</label>
+          <input type="number" id="repag-src-page" value="1" min="1" class="repag-num-input" style="width:54px">
+          <span id="repag-page-total" class="repag-unit"></span>
+        </div>
+        <div class="repag-ctrl-group">
+          <label for="repag-size-preset">Output size</label>
+          <select id="repag-size-preset" class="repag-select">
+            <option value="letter">Letter (612×792)</option>
+            <option value="a4">A4 (595×842)</option>
+            <option value="legal">Legal (612×1008)</option>
+            <option value="tabloid">Tabloid (792×1224)</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </div>
+        <div class="repag-ctrl-group hidden" id="repag-custom-size">
+          <label for="repag-out-w">W</label>
+          <input type="number" id="repag-out-w" value="612" min="1" max="14400" class="repag-num-input" style="width:60px">
+          <label for="repag-out-h">H</label>
+          <input type="number" id="repag-out-h" value="792" min="1" max="14400" class="repag-num-input" style="width:60px">
+          <span class="repag-unit">pt</span>
+        </div>
+        <div class="repag-ctrl-group">
+          <label for="repag-gutter">Gutter</label>
+          <input type="number" id="repag-gutter" value="0" min="0" max="500" class="repag-num-input" style="width:54px">
+          <span class="repag-unit">pt</span>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" id="repag-add-rect-btn">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add Page
+        </button>
+        <button type="button" class="btn btn-outline btn-sm" id="repag-del-rect-btn" disabled>Delete Page</button>
+        <button type="button" class="btn btn-outline btn-sm" id="repag-toggle-view-btn">Preview Output</button>
+        <button type="button" class="btn btn-primary btn-sm" id="repag-run-btn" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Generate PDF
+        </button>
+      </div>
+    </div>
+
+    <div class="repag-workspace hidden" id="repag-workspace">
+      <div class="repag-thumbs" id="repag-thumbs">
+        <div class="repag-thumbs-label" id="repag-thumbs-label">Output Pages</div>
+      </div>
+      <div class="repag-canvas-wrap" id="repag-canvas-wrap">
+        <div class="repag-canvas-inner" id="repag-canvas-inner">
+          <canvas id="repag-canvas"></canvas>
+          <svg id="repag-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════ FORM EDITOR VIEW ═══════════════ -->
+  <div id="view-forms" class="view view--wide hidden">
+
+    <div class="forms-toolbar" id="forms-toolbar">
+      <!-- Drop zone (shown before file is loaded) -->
+      <div class="toolbar-dz-wrap" id="forms-dz-wrap">
+        <div class="toolbar-dropzone" id="forms-dropzone" role="button" tabindex="0" aria-label="Drop a PDF here or click to browse">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+          <span>Drop PDF or</span>
+          <button type="button" class="btn btn-outline btn-sm" id="forms-pick-btn">Browse</button>
+          <input type="file" id="forms-input" accept=".pdf" aria-hidden="true">
+        </div>
+      </div>
+      <!-- Controls (shown after file is loaded) -->
+      <div class="forms-controls hidden" id="forms-controls">
+        <div class="forms-file-chip">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span id="forms-fname"></span>
+          <button type="button" class="btn-icon btn-remove" id="forms-clear-btn" aria-label="Remove file">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="forms-tool-group" role="group" aria-label="Active tool">
+          <button class="forms-tool-btn active" data-tool="select">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M4 2l16 10-8 1.5-3.5 6.5z"/></svg>
+            Select
+          </button>
+          <button class="forms-tool-btn" data-tool="text">Text</button>
+          <button class="forms-tool-btn" data-tool="checkbox">Checkbox</button>
+          <button class="forms-tool-btn" data-tool="radio">Radio</button>
+          <button class="forms-tool-btn" data-tool="dropdown">Dropdown</button>
+          <button class="forms-tool-btn" data-tool="list">List</button>
+        </div>
+        <div class="forms-toolbar-actions">
+          <button type="button" class="btn btn-outline btn-sm" id="forms-delete-btn" disabled>Delete Field</button>
+          <button type="button" class="btn btn-outline btn-sm" id="forms-tab-order-btn">Tab Order</button>
+          <button type="button" class="btn btn-primary btn-sm" id="forms-save-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Save PDF
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="forms-workspace hidden" id="forms-workspace">
+      <div class="forms-pages-strip" id="forms-pages-strip"></div>
+      <div class="forms-editor-area" id="forms-editor-area"></div>
+    </div>
+
+    <!-- Tab order panel (slides in from right) -->
+    <div class="forms-tab-order-panel hidden" id="forms-tab-order-panel">
+      <div class="forms-tab-order-header">
+        <h3>Tab Order</h3>
+        <button type="button" class="btn-icon" id="forms-tab-close-btn" aria-label="Close panel">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <p class="forms-tab-hint">Drag to reorder tab sequence.</p>
+      <div class="tab-order-list" id="tab-order-list"></div>
+    </div>
+
+    <!-- Field settings popup (modal) -->
+    <div class="forms-field-popup hidden" id="forms-field-popup" role="dialog" aria-modal="true" aria-label="Field settings">
+      <div class="forms-popup-inner" id="forms-popup-inner"></div>
+    </div>
+
   </div>
 
   <!-- ═══════════════ LOADING OVERLAY ═══════════════ -->
