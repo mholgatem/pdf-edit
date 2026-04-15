@@ -1373,24 +1373,35 @@ let formsNextId     = 0;
 let formsSelId      = null;
 let formsTool       = 'select';
 let formsDrag       = null;   // same structure as repagDrag
-let formsTabDragIdx = null;
-let formsEditingId  = null;   // field id being edited in popup
+let formsTabDragIdx  = null;
+let formsEditingId   = null;   // field id being edited in popup
+let _pendingNewField = null;   // temp field not yet added to formsFields
+let _snapGuides      = [];     // { x1,y1,x2,y2 } lines to draw during drag
+let _lastClickId     = null;   // for manual double-click detection
+let _lastClickTime   = 0;
 
 const FORMS_DEFAULTS = {
-  text:     { name:'',label:'',defaultValue:'',required:false,numericOnly:false,maxLength:0,borderVisible:true },
-  checkbox: { name:'',label:'',group:'',checkedValue:'Yes',required:false,borderVisible:true },
-  radio:    { groupName:'',value:'',label:'',required:false,borderVisible:true },
-  dropdown: { name:'',label:'',options:['Option 1','Option 2'],defaultIndex:0,required:false,borderVisible:true },
-  list:     { name:'',label:'',options:['Option 1','Option 2'],multiSelect:false,required:false,borderVisible:true },
+  text:      { name:'',label:'',defaultValue:'',required:false,numericOnly:false,maxLength:0,borderVisible:true },
+  checkbox:  { name:'',label:'',group:'',checkedValue:'Yes',required:false,borderVisible:true },
+  radio:     { groupName:'',value:'',label:'',required:false,borderVisible:true },
+  dropdown:  { name:'',label:'',options:['Option 1','Option 2'],defaultIndex:0,required:false,borderVisible:true },
+  list:      { name:'',label:'',options:['Option 1','Option 2'],multiSelect:false,required:false,borderVisible:true },
+  label:     { text:'Label', fontSize:11, fontFamily:'Helvetica', color:'#000000', bgColor:'' },
+  highlight: { bgColor:'rgba(255,235,59,0.4)' },
 };
 const FORMS_FIELD_SIZE = {
-  text:     [150, 22],
-  checkbox: [14,  14],
-  radio:    [14,  14],
-  dropdown: [140, 20],
-  list:     [140, 60],
+  text:      [150, 22],
+  checkbox:  [14,  14],
+  radio:     [14,  14],
+  dropdown:  [140, 20],
+  list:      [140, 60],
+  label:     [80,  14],
+  highlight: [120, 40],
 };
-let formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0 };
+let formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0, label:0, highlight:0 };
+
+const SNAP_PX = 8;
+let formsSnapEnabled = true;  // toggled by header snap button
 
 function setupForms() {
   const dropzone  = document.getElementById('forms-dropzone');
@@ -1413,16 +1424,21 @@ function setupForms() {
   document.getElementById('forms-tab-close-btn').addEventListener('click', closeTabOrderPanel);
   document.getElementById('forms-save-btn').addEventListener('click', runSaveForms);
 
-  // Tool buttons
+  // Tool buttons — popup-first flow
   document.querySelectorAll('.forms-tool-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.forms-tool-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      formsTool = btn.dataset.tool;
-      formsSelId = null;
-      renderAllFormsOverlays();
-      document.getElementById('forms-delete-btn').disabled = true;
+      openNewFieldPopup(btn.dataset.tool);
     });
+  });
+
+  // Keyboard delete
+  document.addEventListener('keydown', e => {
+    if (_currentView !== 'view-forms') return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && formsSelId !== null) {
+      if (['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)) return;
+      e.preventDefault();
+      deleteSelectedField();
+    }
   });
 
   // Global mouse events for drag
@@ -1433,6 +1449,125 @@ function setupForms() {
   document.getElementById('forms-field-popup').addEventListener('click', e => {
     if (e.target === document.getElementById('forms-field-popup')) closeFieldPopup();
   });
+}
+
+// ── Color helpers ─────────────────────────────────────────────────────────────
+// Returns true if text contains any character outside the WinAnsi (Latin-1) range.
+function hasNonWinAnsi(text) {
+  return /[^\x00-\xFF]/.test(text || '');
+}
+
+// Shows the unicode-font confirm dialog; resolves true (embed) or false (fallback).
+function showUnicodeConfirm() {
+  return new Promise(resolve => {
+    const popup = document.getElementById('unicode-confirm-popup');
+    popup.classList.remove('hidden');
+    const btnYes = document.getElementById('unicode-confirm-yes');
+    const btnNo  = document.getElementById('unicode-confirm-no');
+    function finish(result) {
+      popup.classList.add('hidden');
+      btnYes.removeEventListener('click', onYes);
+      btnNo.removeEventListener('click',  onNo);
+      popup.removeEventListener('click',  onBackdrop);
+      resolve(result);
+    }
+    function onYes()           { finish(true);  }
+    function onNo()            { finish(false); }
+    function onBackdrop(e)     { if (e.target === popup) finish(false); }
+    btnYes.addEventListener('click', onYes);
+    btnNo.addEventListener('click',  onNo);
+    popup.addEventListener('click',  onBackdrop);
+  });
+}
+
+// Replace characters outside the WinAnsi range with readable ASCII equivalents.
+// Standard PDF fonts (Helvetica, Times-Roman, Courier) use WinAnsi encoding and
+// will throw on any codepoint they can't encode.
+function winAnsiSafe(text) {
+  if (!text) return '';
+  const map = {
+    // Arrows
+    '\u2190':'<-', '\u2192':'->', '\u2191':'^',  '\u2193':'v',
+    '\u21D0':'<=', '\u21D2':'=>', '\u21D4':'<=>','\u2194':'<->',
+    // Quotes / dashes
+    '\u2018':"'",  '\u2019':"'",  '\u201A':",",
+    '\u201C':'"',  '\u201D':'"',  '\u201E':',,',
+    '\u2013':'-',  '\u2014':'--', '\u2015':'--',
+    // Math / misc
+    '\u2022':'*',  '\u2026':'...', '\u2020':'+', '\u2021':'++',
+    '\u2030':'0/00', '\u2039':'<', '\u203A':'>',
+    '\u2122':'(TM)','\u00AE':'(R)', '\u00A9':'(C)',
+    '\u2044':'/',  '\u20AC':'EUR', '\u0192':'f',
+    '\u2212':'-',  '\u00D7':'x',  '\u00F7':'/',
+    '\u221E':'inf','\u2248':'~=', '\u2260':'!=', '\u2264':'<=', '\u2265':'>=',
+    '\u00B0':'deg','\u00B5':'u',  '\u00B1':'+/-',
+    // Non-breaking / zero-width spaces
+    '\u00A0':' ',  '\uFEFF':'',   '\u200B':'',
+  };
+  return text
+    .replace(/[^\x00-\xFF]/g, c => (map[c] !== undefined ? map[c] : '?'));
+}
+
+function parseRgba(str) {
+  if (!str) return [1, 1, 0, 0.4];
+  const m = str.match(/rgba?\(\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\s*\)/);
+  if (m) return [parseFloat(m[1])/255, parseFloat(m[2])/255, parseFloat(m[3])/255, m[4]!=null ? parseFloat(m[4]) : 1];
+  return hexToRgbNorm(str);
+}
+function hexToRgb(hex) {
+  const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  return r ? [parseInt(r[1],16), parseInt(r[2],16), parseInt(r[3],16)] : [0,0,0];
+}
+function hexToRgbNorm(hex) {
+  const [r,g,b] = hexToRgb(hex);
+  return [r/255, g/255, b/255, 1];
+}
+function hexToRgba(hex, opacity) {
+  const [r,g,b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+function rgbaToHex(rgba) {
+  if (!rgba) return '#ffeb3b';
+  const m = rgba.match(/rgba?\(\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/);
+  if (!m) return rgba.startsWith('#') ? rgba : '#ffeb3b';
+  return '#' + [m[1],m[2],m[3]].map(v => ('0' + Math.round(parseFloat(v)).toString(16)).slice(-2)).join('');
+}
+function rgbaOpacity(rgba) {
+  if (!rgba) return 0.4;
+  const m = rgba.match(/rgba?\(\s*[\d.]+,\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)/);
+  return m ? parseFloat(m[1]) : 1;
+}
+function rgbToHex(r, g, b) {
+  return '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+}
+function pdfEscStr(str) {
+  return (str || '').replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
+}
+function addAnnotToPage(pg, doc, annotRef) {
+  let arr = pg.node.lookupMaybe(PDFLib.PDFName.of('Annots'), PDFLib.PDFArray);
+  if (!arr) { arr = doc.context.obj([]); pg.node.set(PDFLib.PDFName.of('Annots'), arr); }
+  arr.push(annotRef);
+}
+
+// ── Popup-first field creation ────────────────────────────────────────────────
+function openNewFieldPopup(type) {
+  formsNameCounters[type] = (formsNameCounters[type] || 0) + 1;
+  const settings = JSON.parse(JSON.stringify(FORMS_DEFAULTS[type]));
+  if (type !== 'label' && type !== 'highlight') {
+    settings.name = type + '_' + formsNameCounters[type];
+  }
+  if (type === 'radio') settings.groupName = 'group_1';
+  const tempId = -(++formsNextId);
+  const tempField = { id: tempId, type, page: null, x: 0, y: 0, w: 0, h: 0, settings,
+    isNew: true, parentId: null, childLabelId: null, childOffset: null };
+  formsEditingId   = tempId;
+  _pendingNewField = tempField;
+  const inner = document.getElementById('forms-popup-inner');
+  inner.innerHTML  = buildPopupHTML(tempField);
+  document.getElementById('forms-field-popup').classList.remove('hidden');
+  if (type === 'dropdown' || type === 'list') wireOptionsListEvents(inner, tempField);
+  inner.querySelector('#popup-save-btn').addEventListener('click', saveFieldPopup);
+  inner.querySelector('#popup-cancel-btn').addEventListener('click', closeFieldPopup);
 }
 
 async function loadFormsFile(file) {
@@ -1452,7 +1587,7 @@ async function loadFormsFile(file) {
   formsSelId  = null;
   formsCurPage = 1;
   formsScales = [];
-  formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0 };
+  formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0, label:0, highlight:0 };
 
   document.getElementById('forms-fname').textContent = file.name;
   document.getElementById('forms-dz-wrap').classList.add('hidden');
@@ -1477,6 +1612,7 @@ async function loadFormsFile(file) {
 
   hideLoading();
   navigateFormsPage(1);
+  renderAllFormsOverlays();
 }
 
 async function renderFormsPage(pageNum, editorArea, pagesStrip) {
@@ -1501,7 +1637,10 @@ async function renderFormsPage(pageNum, editorArea, pagesStrip) {
   canvas.style.width  = cssW + 'px';
   canvas.style.height = cssH + 'px';
   const vp = pdfPage.getViewport({ scale: scale * dpr });
-  await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  // annotationMode: 0 = DISABLE — suppress form widget and annotation rendering on the canvas.
+  // The SVG overlay draws all field visuals, so canvas-painted annotations would double-render
+  // and leave ghost images when fields are moved in the editor.
+  await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport: vp, annotationMode: 0 }).promise;
 
   const overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   overlay.setAttribute('width',  cssW);
@@ -1511,10 +1650,6 @@ async function renderFormsPage(pageNum, editorArea, pagesStrip) {
   overlay.dataset.page = pageNum;
 
   overlay.addEventListener('mousedown', e => onFormsMouseDown(e, pageNum));
-  overlay.addEventListener('dblclick',  e => {
-    const id = e.target.dataset.id ? +e.target.dataset.id : null;
-    if (id !== null) openFieldPopup(id);
-  });
 
   wrap.appendChild(canvas);
   wrap.appendChild(overlay);
@@ -1575,6 +1710,12 @@ function detectExistingFields() {
 
         const settings = JSON.parse(JSON.stringify(FORMS_DEFAULTS[type]));
         settings.name = field.getName();
+        // Read current field values so the editor overlay can display them
+        if (type === 'text') {
+          try { settings.defaultValue = field.getText() || ''; } catch(e) {}
+        } else if (type === 'dropdown' || type === 'list') {
+          try { const sel = field.getSelected(); settings.defaultIndex = sel.length ? 0 : -1; } catch(e) {}
+        }
 
         formsFields.push({
           id: ++formsNextId,
@@ -1582,10 +1723,67 @@ function detectExistingFields() {
           page: pageNum,
           x: wr.x, y: wr.y, w: wr.width, h: wr.height,
           settings,
+          isNew: false, isExisting: true, parentId: null, childLabelId: null, childOffset: null,
         });
         formsNameCounters[type] = (formsNameCounters[type] || 0) + 1;
       } catch(e) { /* skip malformed widget */ }
     });
+  });
+
+  // Restore label / highlight fields that were saved as PDF annotations in a previous session
+  const { PDFArray: _PA, PDFDict: _PD, PDFString: _PS, PDFName: _PN } = PDFLib;
+  formsPdfDoc.getPages().forEach((page, pageIdx) => {
+    const pageNum = pageIdx + 1;
+    const annotsRef = page.node.lookupMaybe(_PN.of('Annots'), _PA);
+    if (!annotsRef) return;
+    for (let j = 0; j < annotsRef.size(); j++) {
+      try {
+        const dict = formsPdfDoc.context.lookupMaybe(annotsRef.get(j), _PD);
+        if (!dict) continue;
+        const nm = dict.lookupMaybe(_PN.of('NM'), _PS)?.decodeText() || '';
+        if (!nm.startsWith('forms-label-') && !nm.startsWith('forms-highlight-')) continue;
+
+        const rawRect = dict.get(_PN.of('Rect'));
+        const rectArr = rawRect
+          ? (formsPdfDoc.context.lookupMaybe(rawRect, _PA) ?? dict.lookupMaybe(_PN.of('Rect'), _PA))
+          : null;
+        if (!rectArr) continue;
+        const rx = rectArr.get(0).asNumber(), ry = rectArr.get(1).asNumber();
+        const rw = rectArr.get(2).asNumber() - rx, rh = rectArr.get(3).asNumber() - ry;
+
+        if (nm.startsWith('forms-label-')) {
+          const contents = dict.lookupMaybe(_PN.of('Contents'), _PS)?.decodeText() || '';
+          const da = dict.lookupMaybe(_PN.of('DA'), _PS)?.decodeText() || '';
+          const fontMatch  = da.match(/\/(\S+)\s+([\d.]+)\s+Tf/);
+          const colorMatch = da.match(/([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg/);
+          const fontFamilyMap = { 'Helvetica':'Helvetica', 'Times-Roman':'Times-Roman', 'Courier':'Courier' };
+          const fontFamily = fontFamilyMap[fontMatch?.[1]] || 'Helvetica';
+          const fontSize   = fontMatch ? parseFloat(fontMatch[2]) : 11;
+          const color = colorMatch
+            ? rgbToHex(Math.round(parseFloat(colorMatch[1])*255), Math.round(parseFloat(colorMatch[2])*255), Math.round(parseFloat(colorMatch[3])*255))
+            : '#000000';
+          const settings = { ...JSON.parse(JSON.stringify(FORMS_DEFAULTS.label)), text: contents, fontFamily, fontSize, color };
+          formsFields.push({ id: ++formsNextId, type: 'label', page: pageNum, x: rx, y: ry, w: rw, h: rh,
+            settings, isNew: false, isExisting: false, parentId: null, childLabelId: null, childOffset: null });
+          formsNameCounters.label++;
+        } else {
+          const rawIC  = dict.get(_PN.of('IC'));
+          const icArr  = rawIC ? (formsPdfDoc.context.lookupMaybe(rawIC, _PA) ?? dict.lookupMaybe(_PN.of('IC'), _PA)) : null;
+          const caEntry = dict.lookupMaybe(_PN.of('CA'));
+          const ca = caEntry ? caEntry.asNumber() : 0.4;
+          let bgColor = 'rgba(255,235,59,0.4)';
+          if (icArr) {
+            const r = Math.round(icArr.get(0).asNumber() * 255);
+            const g = Math.round(icArr.get(1).asNumber() * 255);
+            const b = Math.round(icArr.get(2).asNumber() * 255);
+            bgColor = `rgba(${r},${g},${b},${ca.toFixed(2)})`;
+          }
+          formsFields.push({ id: ++formsNextId, type: 'highlight', page: pageNum, x: rx, y: ry, w: rw, h: rh,
+            settings: { bgColor }, isNew: false, isExisting: false, parentId: null, childLabelId: null, childOffset: null });
+          formsNameCounters.highlight++;
+        }
+      } catch(e) { /* skip malformed annotation */ }
+    }
   });
 }
 
@@ -1599,9 +1797,22 @@ function renderFormsOverlay(pageNum) {
   overlay.innerHTML = '';
   const ns    = 'http://www.w3.org/2000/svg';
   const scale = formsScales[pageNum] || 1;
-  const pdfPg = formsPdfDoc.getPages()[pageNum - 1];
+  const pdfPg = formsPdfDoc?.getPages()[pageNum - 1];
   if (!pdfPg) return;
-  const { height: pgH } = pdfPg.getSize();
+  const { height: pgH, width: pgW } = pdfPg.getSize();
+
+  // Draw connector lines between parent fields and child labels first (below fields)
+  formsFields.filter(f => f.childLabelId && f.page === pageNum).forEach(parent => {
+    const child = formsFields.find(c => c.id === parent.childLabelId);
+    if (!child || child.page !== pageNum) return;
+    const ps = formsPdfToSvg(parent.x + parent.w/2, parent.y + parent.h/2, 0, 0, pageNum);
+    const cs = formsPdfToSvg(child.x  + child.w /2, child.y  + child.h /2, 0, 0, pageNum);
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', ps.x); line.setAttribute('y1', ps.y);
+    line.setAttribute('x2', cs.x); line.setAttribute('y2', cs.y);
+    line.setAttribute('class', 'forms-child-connector');
+    overlay.appendChild(line);
+  });
 
   const fields = formsFields.filter(f => f.page === pageNum);
   fields.forEach(f => {
@@ -1610,35 +1821,170 @@ function renderFormsOverlay(pageNum) {
     const sw = f.w * scale;
     const sh = f.h * scale;
     const sel = f.id === formsSelId;
+    const t   = f.type;
+    const s   = f.settings;
 
     const g = document.createElementNS(ns, 'g');
     g.dataset.id = f.id;
+    if (f.isNew) g.classList.add('forms-field-new');
 
-    const rect = document.createElementNS(ns, 'rect');
-    rect.setAttribute('x', sx); rect.setAttribute('y', sy);
-    rect.setAttribute('width', sw); rect.setAttribute('height', sh);
-    rect.setAttribute('class', 'forms-field-rect' + (sel ? ' selected' : ''));
-    rect.dataset.id = f.id;
-    g.appendChild(rect);
+    if (t === 'highlight') {
+      // Translucent colored rect, no stroke
+      const rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('x', sx); rect.setAttribute('y', sy);
+      rect.setAttribute('width', sw); rect.setAttribute('height', sh);
+      rect.setAttribute('class', 'forms-field-highlight-rect' + (sel ? ' selected' : ''));
+      rect.setAttribute('fill', s.bgColor || 'rgba(255,235,59,0.4)');
+      rect.dataset.id = f.id;
+      g.appendChild(rect);
+    } else if (t === 'label') {
+      // Optional background rect
+      if (s.bgColor) {
+        const bg = document.createElementNS(ns, 'rect');
+        bg.setAttribute('x', sx); bg.setAttribute('y', sy);
+        bg.setAttribute('width', sw); bg.setAttribute('height', sh);
+        bg.setAttribute('fill', s.bgColor); bg.setAttribute('stroke', 'none');
+        bg.dataset.id = f.id;
+        g.appendChild(bg);
+      }
+      // Clickable/selectable invisible hit rect
+      const hit = document.createElementNS(ns, 'rect');
+      hit.setAttribute('x', sx); hit.setAttribute('y', sy);
+      hit.setAttribute('width', sw); hit.setAttribute('height', sh);
+      hit.setAttribute('fill', sel ? 'rgba(99,102,241,0.08)' : 'transparent');
+      hit.setAttribute('stroke', sel ? '#6366f1' : 'transparent');
+      hit.setAttribute('stroke-width', '1.5');
+      hit.setAttribute('stroke-dasharray', '3 2');
+      hit.setAttribute('cursor', 'move');
+      hit.dataset.id = f.id;
+      g.appendChild(hit);
+      // Render actual text inside the rect
+      const txt = document.createElementNS(ns, 'text');
+	  const txtFontSizePx = (s.fontSize || 11) * scale;
+      txt.setAttribute('x', sx + 2); txt.setAttribute('y', sy + 2);
+      txt.setAttribute('class', 'forms-field-label-text');
+      txt.setAttribute('fill', s.color || '#000000');
+      txt.setAttribute('font-size', txtFontSizePx + 'px');
+      txt.setAttribute('font-family', s.fontFamily || 'Helvetica, sans-serif');
+      txt.textContent = s.text || '';
+      g.appendChild(txt);
+      // Small type badge at top-right corner when selected
+      if (sel) {
+        const badge = document.createElementNS(ns, 'text');
+        badge.setAttribute('x', sx + sw - 2); badge.setAttribute('y', sy + 2);
+        badge.setAttribute('class', 'forms-field-label');
+        badge.setAttribute('text-anchor', 'end');
+        badge.textContent = 'label';
+        g.appendChild(badge);
+      }
+    } else {
+      // Interactive field types — styled border rect
+      const body = document.createElementNS(ns, 'rect');
+      body.setAttribute('x', sx); body.setAttribute('y', sy);
+      body.setAttribute('width', sw); body.setAttribute('height', sh);
+      body.setAttribute('class', 'forms-field-rect forms-field-body' + (sel ? ' selected' : ''));
+      body.dataset.id = f.id;
+      g.appendChild(body);
 
-    const label = document.createElementNS(ns, 'text');
-    label.setAttribute('x', sx + 2); label.setAttribute('y', sy + 2);
-    label.setAttribute('class', 'forms-field-label');
-    label.textContent = (f.settings.name || f.type) + (f.settings.label ? ` (${f.settings.label})` : '');
-    g.appendChild(label);
+      // Type-specific interior decoration
+      if (t === 'checkbox') {
+        // X mark inside
+        const m = 3 * scale;
+        ['tl-br','bl-tr'].forEach(d => {
+          const ln = document.createElementNS(ns, 'line');
+          if (d === 'tl-br') {
+            ln.setAttribute('x1', sx + m); ln.setAttribute('y1', sy + m);
+            ln.setAttribute('x2', sx + sw - m); ln.setAttribute('y2', sy + sh - m);
+          } else {
+            ln.setAttribute('x1', sx + m); ln.setAttribute('y1', sy + sh - m);
+            ln.setAttribute('x2', sx + sw - m); ln.setAttribute('y2', sy + m);
+          }
+          ln.setAttribute('stroke', '#6366f1'); ln.setAttribute('stroke-width', '1.5');
+          ln.setAttribute('pointer-events', 'none');
+          g.appendChild(ln);
+        });
+      } else if (t === 'radio') {
+        // Hide the square body rect for radio, use circle instead
+        body.setAttribute('fill', 'transparent'); body.setAttribute('stroke', 'transparent');
+        const cx2 = sx + sw/2, cy2 = sy + sh/2, r = Math.min(sw, sh)/2 - 1;
+        const circle = document.createElementNS(ns, 'circle');
+        circle.setAttribute('cx', cx2); circle.setAttribute('cy', cy2); circle.setAttribute('r', r);
+        circle.setAttribute('fill', sel ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.08)');
+        circle.setAttribute('stroke', '#6366f1'); circle.setAttribute('stroke-width', sel ? '2.5' : '1.5');
+        circle.setAttribute('pointer-events', 'none');
+        g.appendChild(circle);
+        const dot = document.createElementNS(ns, 'circle');
+        dot.setAttribute('cx', cx2); dot.setAttribute('cy', cy2); dot.setAttribute('r', Math.max(1, r * 0.35));
+        dot.setAttribute('fill', '#6366f1'); dot.setAttribute('pointer-events', 'none');
+        g.appendChild(dot);
+      } else if (t === 'dropdown') {
+        // Placeholder text + downward triangle
+        const ph = document.createElementNS(ns, 'text');
+        ph.setAttribute('x', sx + 3); ph.setAttribute('y', sy + 3);
+        ph.setAttribute('class', 'forms-field-placeholder');
+        ph.textContent = s.name || 'Select…';
+        g.appendChild(ph);
+        const arrowX = sx + sw - 2 - 5 * scale;
+        const arrowY = sy + sh / 2;
+        const sz = Math.max(3, 4 * scale);
+        const tri = document.createElementNS(ns, 'polygon');
+        tri.setAttribute('points', `${arrowX - sz},${arrowY - sz/2} ${arrowX + sz},${arrowY - sz/2} ${arrowX},${arrowY + sz/2}`);
+        tri.setAttribute('fill', '#6366f1'); tri.setAttribute('pointer-events', 'none');
+        g.appendChild(tri);
+      } else if (t === 'list') {
+        // 3 horizontal lines
+        const lineCount = 3, pad = 4 * scale, lineGap = (sh - pad * 2) / (lineCount + 1);
+        for (let li = 1; li <= lineCount; li++) {
+          const ln = document.createElementNS(ns, 'line');
+          const ly = sy + pad + li * lineGap;
+          ln.setAttribute('x1', sx + pad); ln.setAttribute('y1', ly);
+          ln.setAttribute('x2', sx + sw - pad); ln.setAttribute('y2', ly);
+          ln.setAttribute('stroke', 'rgba(99,102,241,0.5)'); ln.setAttribute('stroke-width', '1');
+          ln.setAttribute('pointer-events', 'none');
+          g.appendChild(ln);
+        }
+      } else if (t === 'text') {
+        // Only show placeholder text when a default/value has been set
+        if (s.defaultValue) {
+          const ph = document.createElementNS(ns, 'text');
+          ph.setAttribute('x', sx + 3); ph.setAttribute('y', sy + 3);
+          ph.setAttribute('class', 'forms-field-placeholder');
+          ph.textContent = s.defaultValue;
+          g.appendChild(ph);
+        }
+      }
 
+      // Field name/label overlay text — rendered above the rect.
+      // CSS sets font-size: 9px + dominant-baseline: hanging, so y = sy - 10 puts
+      // the text baseline at sy-1 (1px gap above the rect top edge).
+      const lbl = document.createElementNS(ns, 'text');
+      lbl.setAttribute('x', sx + 2); lbl.setAttribute('y', sy - 10);
+      lbl.setAttribute('class', 'forms-field-label');
+      lbl.textContent = (s.name || t) + (s.label ? ` (${s.label})` : '');
+      g.appendChild(lbl);
+    }
+
+    // Resize handles when selected
     if (sel) {
-      [{ id:'tl',cx:sx,   cy:sy    }, { id:'tr',cx:sx+sw,cy:sy    },
-       { id:'bl',cx:sx,   cy:sy+sh }, { id:'br',cx:sx+sw,cy:sy+sh }].forEach(c => {
+      [{ id:'tl',cx:sx,    cy:sy    }, { id:'tr',cx:sx+sw, cy:sy    },
+       { id:'bl',cx:sx,    cy:sy+sh }, { id:'br',cx:sx+sw, cy:sy+sh }].forEach(c => {
         const h = document.createElementNS(ns, 'circle');
         h.setAttribute('cx', c.cx); h.setAttribute('cy', c.cy);
         h.setAttribute('class', 'forms-handle');
         h.dataset.corner = c.id; h.dataset.id = f.id;
         g.appendChild(h);
       });
-      // Edit button (small foreignObject or just double-click)
     }
     overlay.appendChild(g);
+  });
+
+  // Snap guides (active during drag)
+  _snapGuides.forEach(gl => {
+    const ln = document.createElementNS(ns, 'line');
+    ln.setAttribute('x1', gl.x1); ln.setAttribute('y1', gl.y1);
+    ln.setAttribute('x2', gl.x2); ln.setAttribute('y2', gl.y2);
+    ln.setAttribute('class', 'forms-snap-guide');
+    overlay.appendChild(ln);
   });
 }
 
@@ -1668,17 +2014,124 @@ function formsPdfToSvg(x, y, w, h, pageNum) {
   return { x: x*scale, y: (pgH-y-h)*scale, w: w*scale, h: h*scale };
 }
 
+// ── Snap helper ───────────────────────────────────────────────────────────────
+function snapFormsField(f, candidateSvgLeft, candidateSvgTop, pageNum, pdfX, pdfY) {
+  const scale  = formsScales[pageNum] || 1;
+  const pdfPg  = formsPdfDoc?.getPages()[pageNum - 1];
+  const pgH    = pdfPg ? pdfPg.getSize().height : 792;
+  const svgW   = (pdfPg ? pdfPg.getSize().width : 612) * scale;
+  const svgH   = pgH * scale;
+
+  const fSvgW  = f.w * scale;
+  const fSvgH  = f.h * scale;
+  let sx = candidateSvgLeft;
+  let sy = candidateSvgTop;
+  const guides = [];
+
+  // Edges and centers of candidate field in SVG space
+  const edges = {
+    left:    sx,
+    centerX: sx + fSvgW / 2,
+    right:   sx + fSvgW,
+    top:     sy,
+    centerY: sy + fSvgH / 2,
+    bottom:  sy + fSvgH,
+  };
+
+  // Collect other fields on same page — exclude this field's own child label
+  const others = formsFields.filter(o => o.id !== f.id && o.page === pageNum && o.id !== f.childLabelId);
+
+  let snapX = null, snapY = null;
+
+  for (const o of others) {
+    const os = formsPdfToSvg(o.x, o.y, o.w, o.h, pageNum);
+    const oEdges = {
+      left: os.x, centerX: os.x + os.w/2, right: os.x + os.w,
+      top: os.y,  centerY: os.y + os.h/2, bottom: os.y + os.h,
+    };
+
+    // Horizontal alignment (same x)
+    if (snapX === null) {
+      for (const fKey of ['left','centerX','right']) {
+        for (const oKey of ['left','centerX','right']) {
+          const diff = edges[fKey] - oEdges[oKey];
+          if (Math.abs(diff) < SNAP_PX) {
+            sx -= diff;
+            snapX = oEdges[oKey];
+            guides.push({ x1: snapX, y1: 0, x2: snapX, y2: svgH });
+            break;
+          }
+        }
+        if (snapX !== null) break;
+      }
+    }
+
+    // Vertical alignment (same y)
+    if (snapY === null) {
+      for (const fKey of ['top','centerY','bottom']) {
+        for (const oKey of ['top','centerY','bottom']) {
+          const diff = edges[fKey] - oEdges[oKey];
+          if (Math.abs(diff) < SNAP_PX) {
+            sy -= diff;
+            snapY = oEdges[oKey];
+            guides.push({ x1: 0, y1: snapY, x2: svgW, y2: snapY });
+            break;
+          }
+        }
+        if (snapY !== null) break;
+      }
+    }
+  }
+
+  // Child-to-parent snap for child labels
+  if (f.parentId) {
+    const parent = formsFields.find(p => p.id === f.parentId);
+    if (parent) {
+      const ps = formsPdfToSvg(parent.x, parent.y, parent.w, parent.h, pageNum);
+      const canonicals = [
+        // Above parent (centered)
+        { x: ps.x + ps.w/2 - fSvgW/2, y: ps.y - fSvgH - 4 * scale },
+        // Below parent (centered)
+        { x: ps.x + ps.w/2 - fSvgW/2, y: ps.y + ps.h + 4 * scale },
+        // Left of parent (y-centered)
+        { x: ps.x - fSvgW - 4 * scale, y: ps.y + ps.h/2 - fSvgH/2 },
+        // Right of parent (y-centered)
+        { x: ps.x + ps.w + 4 * scale, y: ps.y + ps.h/2 - fSvgH/2 },
+      ];
+      for (const c of canonicals) {
+        const dx = sx - c.x, dy = sy - c.y;
+        if (Math.abs(dx) < SNAP_PX * 2 && Math.abs(dy) < SNAP_PX * 2) {
+          sx = c.x; sy = c.y;
+          guides.length = 0; // clear alignment guides, show parent connector instead
+          break;
+        }
+      }
+    }
+  }
+
+  // Convert snapped SVG back to PDF coords
+  const snappedPdf = formsSvgToPdf(sx, sy, fSvgW, fSvgH, pageNum);
+  return { x: snappedPdf.x, y: snappedPdf.y, guides };
+}
+
+function isFieldElement(el) {
+  return el.classList.contains('forms-field-rect') ||
+         el.classList.contains('forms-field-highlight-rect') ||
+         el.classList.contains('forms-field-body') ||
+         el.classList.contains('forms-field-label-text') ||
+         (el.tagName === 'rect' && el.dataset.id);
+}
+
 function onFormsMouseDown(e, pageNum) {
   const target = e.target;
-  const id     = target.dataset.id ? +target.dataset.id : null;
+  // id lives on the element directly or propagated from its parent <g>
+  const id = target.dataset.id ? +target.dataset.id
+           : (target.closest('g[data-id]') ? +target.closest('g[data-id]').dataset.id : null);
 
   if (target.classList.contains('forms-handle') && id !== null) {
     e.preventDefault();
     const f     = formsFields.find(f => f.id === id);
     if (!f) return;
-    const scale = formsScales[pageNum] || 1;
-    const pdfPg = formsPdfDoc.getPages()[pageNum - 1];
-    const pgH   = pdfPg ? pdfPg.getSize().height : 792;
     const s     = formsPdfToSvg(f.x, f.y, f.w, f.h, pageNum);
     const corner = target.dataset.corner;
     const anchors = {
@@ -1688,30 +2141,28 @@ function onFormsMouseDown(e, pageNum) {
     const pt = getFormsSvgPoint(e, pageNum);
     formsDrag = { type:'resize', id, pageNum, corner, anchorSvgX: anchors[corner].x, anchorSvgY: anchors[corner].y, startPt: pt };
     selectFormsField(id);
-  } else if (target.classList.contains('forms-field-rect') && id !== null) {
-    if (formsTool === 'select') {
-      e.preventDefault();
-      const f  = formsFields.find(f => f.id === id);
-      if (!f) return;
-      const pt = getFormsSvgPoint(e, pageNum);
-      const s  = formsPdfToSvg(f.x, f.y, f.w, f.h, pageNum);
-      formsDrag = { type:'move', id, pageNum, startPt: pt, startField: { ...f } };
-      selectFormsField(id);
-    } else {
-      // Double-click handled separately; single click just selects
-      selectFormsField(id);
+  } else if (isFieldElement(target) && id !== null) {
+    // Manual double-click detection — the browser's dblclick event is unreliable here
+    // because selectFormsField re-renders the overlay on the first click, changing the
+    // target element before the second click fires, so dblclick never gets a consistent target.
+    const now = Date.now();
+    if (id === _lastClickId && now - _lastClickTime < 400) {
+      _lastClickId = null; _lastClickTime = 0;
+      openFieldPopup(id);
+      return;
     }
-  } else if (!target.classList.contains('forms-handle') && !target.classList.contains('forms-field-rect')) {
-    // Place new field if tool is active
-    if (formsTool !== 'select') {
-      e.preventDefault();
-      const pt = getFormsSvgPoint(e, pageNum);
-      placeFormsField(formsTool, pt.x, pt.y, pageNum);
-    } else {
-      formsSelId = null;
-      document.getElementById('forms-delete-btn').disabled = true;
-      renderFormsOverlay(pageNum);
-    }
+    _lastClickId = id; _lastClickTime = now;
+
+    const f  = formsFields.find(f => f.id === id);
+    if (!f) return;
+    const pt = getFormsSvgPoint(e, pageNum);
+    formsDrag = { type:'move', id, pageNum, startPt: pt, startField: { ...f } };
+    selectFormsField(id);
+  } else if (!target.classList.contains('forms-handle') && !isFieldElement(target)) {
+    // Blank canvas — deselect
+    formsSelId = null;
+    document.getElementById('forms-delete-btn').disabled = true;
+    renderFormsOverlay(pageNum);
   }
 }
 
@@ -1730,8 +2181,17 @@ function onFormsMouseMove(e) {
   if (formsDrag.type === 'move') {
     const dx = (pt.x - formsDrag.startPt.x) / scale;
     const dy = -(pt.y - formsDrag.startPt.y) / scale;
-    f.x = clamp(formsDrag.startField.x + dx, 0, pgW - f.w);
-    f.y = clamp(formsDrag.startField.y + dy, 0, pgH - f.h);
+    let nx = clamp(formsDrag.startField.x + dx, 0, pgW - f.w);
+    let ny = clamp(formsDrag.startField.y + dy, 0, pgH - f.h);
+    // Snap
+    if (formsSnapEnabled) {
+      const snapped = snapFormsField(f, nx * scale, (pgH - ny - f.h) * scale, pageNum, nx, ny);
+      f.x = snapped.x; f.y = snapped.y;
+      _snapGuides = snapped.guides;
+    } else {
+      f.x = nx; f.y = ny;
+      _snapGuides = [];
+    }
   } else {
     const ax = formsDrag.anchorSvgX, ay = formsDrag.anchorSvgY;
     const left = Math.min(ax, pt.x), top = Math.min(ay, pt.y);
@@ -1741,11 +2201,37 @@ function onFormsMouseMove(e) {
     const np = formsSvgToPdf(left, top, right - left, bottom - top, pageNum);
     f.x = clamp(np.x, 0, pgW); f.y = clamp(np.y, 0, pgH);
     f.w = Math.min(np.w, pgW - f.x); f.h = Math.min(np.h, pgH - f.y);
+    _snapGuides = [];
   }
+
+  // Move linked child with parent (childOffset is stored on the child)
+  if (f.childLabelId) {
+    const child = formsFields.find(c => c.id === f.childLabelId);
+    if (child?.childOffset) {
+      child.x = f.x + child.childOffset.dx;
+      child.y = f.y + child.childOffset.dy;
+    }
+  }
+
   renderFormsOverlay(pageNum);
 }
 
 function onFormsMouseUp(e) {
+  if (formsDrag) {
+    const { id, pageNum } = formsDrag;
+    const f = formsFields.find(f => f.id === id);
+    if (f) {
+      // Clear new-item glow on first interaction
+      if (f.isNew) { f.isNew = false; }
+      // Update child offset when child is moved independently
+      if (f.parentId && formsDrag.type === 'move') {
+        const parent = formsFields.find(p => p.id === f.parentId);
+        if (parent) f.childOffset = { dx: f.x - parent.x, dy: f.y - parent.y };
+      }
+    }
+    _snapGuides = [];
+    renderFormsOverlay(pageNum);
+  }
   formsDrag = null;
 }
 
@@ -1770,7 +2256,15 @@ function placeFormsField(type, svgX, svgY, pageNum) {
 
 function deleteSelectedField() {
   if (formsSelId === null) return;
-  formsFields = formsFields.filter(f => f.id !== formsSelId);
+  const f = formsFields.find(f => f.id === formsSelId);
+  const idsToDelete = new Set([formsSelId]);
+  if (f?.childLabelId) idsToDelete.add(f.childLabelId);
+  // Clean parent's childLabelId reference if deleting a child
+  if (f?.parentId) {
+    const parent = formsFields.find(p => p.id === f.parentId);
+    if (parent) parent.childLabelId = null;
+  }
+  formsFields = formsFields.filter(f => !idsToDelete.has(f.id));
   formsSelId = null;
   document.getElementById('forms-delete-btn').disabled = true;
   renderAllFormsOverlays();
@@ -1801,7 +2295,7 @@ function renderTabOrderList() {
 
     const name = document.createElement('div');
     name.className = 'tab-order-name';
-    name.textContent = f.settings.name || f.type;
+    name.textContent = f.settings.name || f.settings.text || f.type;
 
     const badge = document.createElement('span');
     badge.className = 'tab-type-badge'; badge.textContent = f.type;
@@ -1846,6 +2340,8 @@ function openFieldPopup(id) {
   formsEditingId = id;
   const f = formsFields.find(f => f.id === id);
   if (!f) return;
+  // Clear new-item glow on explicit double-click open
+  if (f.isNew) { f.isNew = false; renderAllFormsOverlays(); }
   const inner = document.getElementById('forms-popup-inner');
   inner.innerHTML = buildPopupHTML(f);
   document.getElementById('forms-field-popup').classList.remove('hidden');
@@ -1860,15 +2356,77 @@ function buildPopupHTML(f) {
   const t = f.type;
   let html = `<div class="popup-title">Configure ${t.charAt(0).toUpperCase()+t.slice(1)} Field</div>`;
 
-  // Common: name + label
+  // Label and Highlight types have their own structure
+  if (t === 'label') {
+    const bgHex = s.bgColor ? rgbaToHex(s.bgColor) : '#ffffff';
+    html += `
+      <div class="popup-field">
+        <label>Text</label>
+        <input type="text" id="pp-label-text" value="${escHtml(s.text||'')}" autocomplete="off">
+      </div>
+      <div class="popup-row">
+        <div class="popup-field">
+          <label>Font</label>
+          <select id="pp-font">
+            <option value="Helvetica" ${s.fontFamily==='Helvetica'?'selected':''}>Helvetica</option>
+            <option value="Times-Roman" ${s.fontFamily==='Times-Roman'?'selected':''}>Times Roman</option>
+            <option value="Courier" ${s.fontFamily==='Courier'?'selected':''}>Courier</option>
+          </select>
+        </div>
+        <div class="popup-field">
+          <label>Size</label>
+          <input type="number" id="pp-fontsize" value="${s.fontSize||11}" min="6" max="72" style="width:70px">
+        </div>
+      </div>
+      <div class="popup-row">
+        <div class="popup-field">
+          <label>Text Color</label>
+          <input type="color" id="pp-color" value="${s.color||'#000000'}">
+        </div>
+        <div class="popup-field">
+          <label>Background</label>
+          <input type="color" id="pp-bgcolor" value="${bgHex}">
+          <label class="popup-check-row" style="margin-top:6px">
+            <input type="checkbox" id="pp-bg-transparent" ${!s.bgColor?'checked':''}> Transparent
+          </label>
+        </div>
+      </div>
+      <div class="popup-footer">
+        <button type="button" class="btn btn-outline btn-sm" id="popup-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="popup-save-btn">Save</button>
+      </div>`;
+    return html;
+  }
+
+  if (t === 'highlight') {
+    const bgHex = rgbaToHex(s.bgColor || 'rgba(255,235,59,0.4)');
+    const bgOp  = Math.round(rgbaOpacity(s.bgColor || 'rgba(255,235,59,0.4)') * 100);
+    html += `
+      <div class="popup-field">
+        <label>Highlight Color</label>
+        <input type="color" id="pp-bgcolor" value="${bgHex}">
+      </div>
+      <div class="popup-field">
+        <label>Opacity: <span id="pp-opacity-label">${bgOp}%</span></label>
+        <input type="range" id="pp-opacity" min="5" max="100" value="${bgOp}" style="width:100%"
+          oninput="document.getElementById('pp-opacity-label').textContent=this.value+'%'">
+      </div>
+      <div class="popup-footer">
+        <button type="button" class="btn btn-outline btn-sm" id="popup-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="popup-save-btn">Save</button>
+      </div>`;
+    return html;
+  }
+
+  // Common: name + label (for interactive field types)
   html += `
     <div class="popup-field">
       <label>Field Name (unique ID)</label>
-      <input type="text" id="pp-name" value="${escHtml(s.name)}" placeholder="${t}_1" autocomplete="off">
+      <input type="text" id="pp-name" value="${escHtml(s.name||'')}" placeholder="${t}_1" autocomplete="off">
     </div>
     <div class="popup-field">
       <label>Label (visible to user)</label>
-      <input type="text" id="pp-label" value="${escHtml(s.label)}" autocomplete="off">
+      <input type="text" id="pp-label" value="${escHtml(s.label||'')}" autocomplete="off">
     </div>`;
 
   if (t === 'text') {
@@ -1960,41 +2518,108 @@ function wireRemoveOptBtn(row, inner) {
 }
 
 function saveFieldPopup() {
-  const f = formsFields.find(f => f.id === formsEditingId);
+  // Determine whether this is a pending new field or an existing one
+  const isPending = _pendingNewField !== null && _pendingNewField.id === formsEditingId;
+  const f = isPending ? _pendingNewField : formsFields.find(f => f.id === formsEditingId);
   if (!f) { closeFieldPopup(); return; }
   const s = f.settings;
   const t = f.type;
   const g = id => document.getElementById(id);
 
-  s.name  = (g('pp-name')?.value  || '').trim() || (t + '_' + f.id);
-  s.label = (g('pp-label')?.value || '').trim();
-  s.borderVisible = g('pp-border')?.checked ?? true;
-  s.required      = g('pp-required')?.checked ?? false;
+  // Read type-specific settings from popup
+  if (t === 'label') {
+    s.text       = (g('pp-label-text')?.value || '').trim() || 'Label';
+    s.fontFamily = g('pp-font')?.value || 'Helvetica';
+    s.fontSize   = Math.max(6, parseInt(g('pp-fontsize')?.value || '11', 10));
+    s.color      = g('pp-color')?.value || '#000000';
+    s.bgColor    = g('pp-bg-transparent')?.checked ? '' : (g('pp-bgcolor')?.value || '');
+  } else if (t === 'highlight') {
+    const hex = g('pp-bgcolor')?.value || '#ffeb3b';
+    const op  = (parseInt(g('pp-opacity')?.value || '40', 10) / 100).toFixed(2);
+    s.bgColor = hexToRgba(hex, op);
+  } else {
+    s.name  = (g('pp-name')?.value  || '').trim() || (t + '_' + f.id);
+    s.label = (g('pp-label')?.value || '').trim();
+    s.borderVisible = g('pp-border')?.checked ?? true;
+    s.required      = g('pp-required')?.checked ?? false;
 
-  if (t === 'text') {
-    s.defaultValue = g('pp-default')?.value || '';
-    s.numericOnly  = g('pp-numeric')?.checked ?? false;
-    s.maxLength    = Math.max(0, parseInt(g('pp-maxlen')?.value || '0', 10));
-  } else if (t === 'checkbox') {
-    s.group        = g('pp-group')?.value || '';
-    s.checkedValue = g('pp-checked-value')?.value || 'Yes';
-  } else if (t === 'radio') {
-    s.groupName = g('pp-group-name')?.value || 'group_1';
-    s.value     = g('pp-value')?.value || 'option';
-  } else if (t === 'dropdown' || t === 'list') {
-    s.options = [...document.querySelectorAll('.pp-opt-input')].map(i => i.value).filter(v => v.trim());
-    if (!s.options.length) s.options = ['Option 1'];
-    if (t === 'dropdown') s.defaultIndex = Math.max(0, parseInt(g('pp-default-idx')?.value || '0', 10));
-    if (t === 'list') s.multiSelect = g('pp-multiselect')?.checked ?? false;
+    if (t === 'text') {
+      s.defaultValue = g('pp-default')?.value || '';
+      s.numericOnly  = g('pp-numeric')?.checked ?? false;
+      s.maxLength    = Math.max(0, parseInt(g('pp-maxlen')?.value || '0', 10));
+    } else if (t === 'checkbox') {
+      s.group        = g('pp-group')?.value || '';
+      s.checkedValue = g('pp-checked-value')?.value || 'Yes';
+    } else if (t === 'radio') {
+      s.groupName = g('pp-group-name')?.value || 'group_1';
+      s.value     = g('pp-value')?.value || 'option';
+    } else if (t === 'dropdown' || t === 'list') {
+      s.options = [...document.querySelectorAll('.pp-opt-input')].map(i => i.value).filter(v => v.trim());
+      if (!s.options.length) s.options = ['Option 1'];
+      if (t === 'dropdown') s.defaultIndex = Math.max(0, parseInt(g('pp-default-idx')?.value || '0', 10));
+      if (t === 'list') s.multiSelect = g('pp-multiselect')?.checked ?? false;
+    }
   }
 
-  closeFieldPopup();
-  renderAllFormsOverlays();
+  if (isPending) {
+    // Place at center of current page
+    const page   = formsCurPage || 1;
+    const pdfPg  = formsPdfDoc?.getPages()[page - 1];
+    const pgW    = pdfPg ? pdfPg.getSize().width  : 612;
+    const pgH    = pdfPg ? pdfPg.getSize().height : 792;
+    const [defW, defH] = FORMS_FIELD_SIZE[t];
+    f.id   = ++formsNextId;   // replace negative temp id with real id
+    f.page = page;
+    f.x    = Math.max(0, (pgW - defW) / 2);
+    f.y    = Math.max(0, (pgH - defH) / 2);
+    f.w    = defW;
+    f.h    = defH;
+    f.isNew = true;
+    formsFields.push(f);
+    _pendingNewField = null;
+    formsEditingId   = null;
+    maybeCreateChildLabel(f);
+    closeFieldPopup();
+    selectFormsField(f.id);
+  } else {
+    // Existing field — sync child label text if applicable
+    const child = f.childLabelId ? formsFields.find(c => c.id === f.childLabelId) : null;
+    if (child && f.settings.label) child.settings.text = f.settings.label;
+    // Auto-create child label if label text newly added
+    maybeCreateChildLabel(f);
+    closeFieldPopup();
+    renderAllFormsOverlays();
+  }
 }
 
 function closeFieldPopup() {
   document.getElementById('forms-field-popup').classList.add('hidden');
-  formsEditingId = null;
+  formsEditingId   = null;
+  _pendingNewField = null;
+  // Reset any active tool button styling
+  document.querySelectorAll('.forms-tool-btn').forEach(b => b.classList.remove('active'));
+}
+
+// ── Linked child labels ───────────────────────────────────────────────────────
+function maybeCreateChildLabel(f) {
+  if (f.type === 'label' || f.type === 'highlight') return;
+  if (!f.settings.label || f.childLabelId != null) return;
+  const [lW, lH] = FORMS_FIELD_SIZE.label;
+  const child = {
+    id: ++formsNextId,
+    type: 'label',
+    page: f.page,
+    x: f.x,
+    y: f.y + f.h + 4,
+    w: lW, h: lH,
+    settings: { ...JSON.parse(JSON.stringify(FORMS_DEFAULTS.label)), text: f.settings.label },
+    isNew: false,
+    parentId: f.id,
+    childLabelId: null,
+    childOffset: { dx: 0, dy: f.h + 4 },
+  };
+  f.childLabelId = child.id;
+  formsFields.push(child);
 }
 
 function clearFormsFile() {
@@ -2013,14 +2638,65 @@ function clearFormsFile() {
 // ── Save forms PDF ────────────────────────────────────────────────────────────
 async function runSaveForms() {
   if (!formsFile) return;
+
+  // ── Pre-scan: check for non-WinAnsi characters in label fields ───────────────
+  const unicodeLabels = formsFields.filter(
+    f => f.type === 'label' && hasNonWinAnsi(f.settings.text || '')
+  );
+  let unicodeFont = null; // embedded Liberation font, set if user opts in
+
+  if (unicodeLabels.length > 0) {
+    const embed = await showUnicodeConfirm();
+    if (embed) {
+      // Determine which Liberation font to fetch based on the first affected field
+      const familyToFile = {
+        'Helvetica':   './src/fonts/LiberationSans-Regular.ttf',
+        'Times-Roman': './src/fonts/LiberationSerif-Regular.ttf',
+        'Courier':     './src/fonts/LiberationMono-Regular.ttf',
+      };
+      const firstFamily = unicodeLabels[0].settings.fontFamily || 'Helvetica';
+      const fontPath = familyToFile[firstFamily] || familyToFile['Helvetica'];
+      // fontBytes fetched below after doc is loaded (stored here as a promise)
+      unicodeFont = fontPath; // temporarily hold the path; replaced with the embedded font below
+    }
+  }
+
   showLoading('Building form PDF…');
   try {
     const { PDFDocument, PDFName, PDFArray, PDFDict, PDFString, PDFNumber } = PDFLib;
     const buf    = await formsFile.arrayBuffer();
     const newDoc = await PDFDocument.load(buf);
+
+    // If the user chose to embed a Unicode font, do so now
+    if (typeof unicodeFont === 'string') {
+      setProgress(2, 'Fetching Unicode font…'); await tick();
+      newDoc.registerFontkit(fontkit);
+      const fontBytes = await fetch(unicodeFont).then(r => {
+        if (!r.ok) throw new Error(`Could not load font: ${unicodeFont}`);
+        return r.arrayBuffer();
+      });
+      unicodeFont = await newDoc.embedFont(fontBytes); // replace path with embedded font object
+    }
+
     const form   = newDoc.getForm();
     const pages  = newDoc.getPages();
-    const radioGroups = {}; // groupName → PDFRadioGroup
+    const radioGroups  = {};
+    const stdFontCache = {}; // cache standard font embeds to avoid duplicates
+
+    // Strip any previously-saved forms-editor annotations (label/highlight) from all pages
+    // so they can be rewritten cleanly without stacking on re-save.
+    newDoc.getPages().forEach(pg => {
+      const annotsRef = pg.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      if (!annotsRef) return;
+      const kept = [];
+      for (let k = 0; k < annotsRef.size(); k++) {
+        const ref  = annotsRef.get(k);
+        const dict = newDoc.context.lookupMaybe(ref, PDFDict);
+        const nm   = dict?.lookupMaybe(PDFName.of('NM'), PDFString)?.decodeText() || '';
+        if (!nm.startsWith('forms-label-') && !nm.startsWith('forms-highlight-')) kept.push(ref);
+      }
+      pg.node.set(PDFName.of('Annots'), newDoc.context.obj(kept));
+    });
 
     for (let i = 0; i < formsFields.length; i++) {
       setProgress(5 + (i / formsFields.length) * 85, `Adding field ${i + 1}…`);
@@ -2030,6 +2706,19 @@ async function runSaveForms() {
       const s  = f.settings;
       const pg = pages[f.page - 1];
       if (!pg) continue;
+
+      // Existing AcroForm fields are already embedded in the loaded PDF; only update their position.
+      if (f.isExisting) {
+        try {
+          const existingField = form.getField(s.name);
+          const widgets = existingField.acroField.getWidgets();
+          if (widgets.length > 0) {
+            widgets[0].setRectangle({ x: f.x, y: f.y, width: f.w, height: f.h });
+          }
+        } catch(e) { /* field may have been renamed or removed – skip */ }
+        continue;
+      }
+
       const bw = s.borderVisible ? 1 : 0;
       const opts = { x: f.x, y: f.y, width: f.w, height: f.h, borderWidth: bw };
 
@@ -2038,7 +2727,12 @@ async function runSaveForms() {
         if (s.defaultValue) tf.setText(s.defaultValue);
         if (s.required)     tf.enableRequired();
         if (s.maxLength > 0) tf.setMaxLength(s.maxLength);
-        tf.addToPage(pg, opts);
+        // pdf-lib only generates an appearance stream (making text visible) when a font
+        // is explicitly supplied to addToPage — without it the widget has no /AP and many
+        // viewers (Chromium, web) render it blank.
+        const helvetica = stdFontCache[PDFLib.StandardFonts.Helvetica]
+          ?? (stdFontCache[PDFLib.StandardFonts.Helvetica] = await newDoc.embedFont(PDFLib.StandardFonts.Helvetica));
+        tf.addToPage(pg, { ...opts, font: helvetica });
         if (s.numericOnly) {
           try {
             const widgets = tf.acroField.getWidgets();
@@ -2078,6 +2772,75 @@ async function runSaveForms() {
         if (s.multiSelect) lb.enableMultiselect();
         if (s.required)    lb.enableRequired();
         lb.addToPage(pg, opts);
+      } else if (f.type === 'label') {
+        // Saved as a FreeText annotation (round-trippable; stripped and re-written each save)
+        let pdfFont, drawText;
+        const stdMap2 = {
+          'Helvetica':   PDFLib.StandardFonts.Helvetica,
+          'Times-Roman': PDFLib.StandardFonts.TimesRoman,
+          'Courier':     PDFLib.StandardFonts.Courier,
+        };
+        const fontKey2 = stdMap2[s.fontFamily] || PDFLib.StandardFonts.Helvetica;
+        if (!stdFontCache[fontKey2]) stdFontCache[fontKey2] = await newDoc.embedFont(fontKey2);
+        if (unicodeFont && hasNonWinAnsi(s.text)) { pdfFont = unicodeFont; drawText = s.text; }
+        else { pdfFont = stdFontCache[fontKey2]; drawText = winAnsiSafe(s.text || ''); }
+
+        const fontRef  = pdfFont.ref;
+        const fontName = 'F0';
+        const sz  = s.fontSize || 11;
+        const [cr, cg2, cb2] = hexToRgb(s.color || '#000000');
+
+        let apContent = '';
+        const apRes = { Font: newDoc.context.obj({ [fontName]: fontRef }) };
+        if (s.bgColor) {
+          const [br, bgv, bb2, ba] = parseRgba(s.bgColor);
+          apContent += `/GS0 gs ${br} ${bgv} ${bb2} rg 0 0 ${f.w} ${f.h} re f `;
+          apRes.ExtGState = newDoc.context.obj({ GS0: newDoc.context.obj({ Type: 'ExtGState', ca: ba }) });
+        }
+        apContent += `BT /${fontName} ${sz} Tf ${cr/255} ${cg2/255} ${cb2/255} rg 2 2 Td (${pdfEscStr(drawText)}) Tj ET`;
+
+        const apStream = newDoc.context.stream(apContent, {
+          Type: 'XObject', Subtype: 'Form', FormType: 1,
+          BBox: newDoc.context.obj([0, 0, f.w, f.h]),
+          Resources: newDoc.context.obj(apRes),
+        });
+        const apRef = newDoc.context.register(apStream);
+        const labelAnnotRef = newDoc.context.register(newDoc.context.obj({
+          Type: 'Annot', Subtype: 'FreeText',
+          Rect: newDoc.context.obj([f.x, f.y, f.x + f.w, f.y + f.h]),
+          Contents: PDFString.of(drawText),
+          NM: PDFString.of(`forms-label-${f.id}`),
+          DA: PDFString.of(`/${fontName} ${sz} Tf ${cr/255} ${cg2/255} ${cb2/255} rg`),
+          AP: newDoc.context.obj({ N: apRef }),
+          Border: newDoc.context.obj([0, 0, 0]),
+          F: 4,
+        }));
+        addAnnotToPage(pg, newDoc, labelAnnotRef);
+
+      } else if (f.type === 'highlight') {
+        // Saved as a Square annotation (round-trippable; stripped and re-written each save)
+        const [hr, hg2, hb2, ha] = parseRgba(s.bgColor || 'rgba(255,235,59,0.4)');
+        const hlApContent = `/GS0 gs ${hr} ${hg2} ${hb2} rg 0 0 ${f.w} ${f.h} re f`;
+        const hlApStream = newDoc.context.stream(hlApContent, {
+          Type: 'XObject', Subtype: 'Form', FormType: 1,
+          BBox: newDoc.context.obj([0, 0, f.w, f.h]),
+          Resources: newDoc.context.obj({
+            ExtGState: newDoc.context.obj({ GS0: newDoc.context.obj({ Type: 'ExtGState', ca: ha, CA: ha }) }),
+          }),
+        });
+        const hlApRef = newDoc.context.register(hlApStream);
+        const hlAnnotRef = newDoc.context.register(newDoc.context.obj({
+          Type: 'Annot', Subtype: 'Square',
+          Rect: newDoc.context.obj([f.x, f.y, f.x + f.w, f.y + f.h]),
+          NM: PDFString.of(`forms-highlight-${f.id}`),
+          IC: newDoc.context.obj([hr, hg2, hb2]),
+          CA: ha,
+          AP: newDoc.context.obj({ N: hlApRef }),
+          Border: newDoc.context.obj([0, 0, 0]),
+          BS: newDoc.context.obj({ W: 0 }),
+          F: 4,
+        }));
+        addAnnotToPage(pg, newDoc, hlAnnotRef);
       }
     }
 
@@ -2118,6 +2881,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Theme
   applyTheme(getCookie('theme') || 'light');
   document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+  // Snap toggle
+  const snapBtn = document.getElementById('snap-toggle');
+  snapBtn.addEventListener('click', () => {
+    formsSnapEnabled = !formsSnapEnabled;
+    snapBtn.classList.toggle('snap-on', formsSnapEnabled);
+    snapBtn.innerHTML = formsSnapEnabled ? '&#10003; Snap' : '&#10007; Snap';
+  });
+  snapBtn.classList.toggle('snap-on', formsSnapEnabled);
+  snapBtn.innerHTML = formsSnapEnabled ? '&#10003; Snap' : '&#10007; Snap';
 
   // Navigation
   document.getElementById('btn-go-combine').addEventListener('click',    () => showView('view-combine'));
