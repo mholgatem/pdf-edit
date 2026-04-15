@@ -1388,6 +1388,7 @@ const FORMS_DEFAULTS = {
   list:      { name:'',label:'',options:['Option 1','Option 2'],multiSelect:false,required:false,borderVisible:true },
   label:     { text:'Label', fontSize:11, fontFamily:'Helvetica', color:'#000000', bgColor:'' },
   highlight: { bgColor:'rgba(255,235,59,0.4)' },
+  picture:   { src: '' },
 };
 const FORMS_FIELD_SIZE = {
   text:      [150, 22],
@@ -1397,8 +1398,9 @@ const FORMS_FIELD_SIZE = {
   list:      [140, 60],
   label:     [80,  14],
   highlight: [120, 40],
+  picture:   [120, 90],
 };
-let formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0, label:0, highlight:0 };
+let formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0, label:0, highlight:0, picture:0 };
 
 const SNAP_PX = 8;
 let formsSnapEnabled = true;  // toggled by header snap button
@@ -1553,7 +1555,7 @@ function addAnnotToPage(pg, doc, annotRef) {
 function openNewFieldPopup(type) {
   formsNameCounters[type] = (formsNameCounters[type] || 0) + 1;
   const settings = JSON.parse(JSON.stringify(FORMS_DEFAULTS[type]));
-  if (type !== 'label' && type !== 'highlight') {
+  if (type !== 'label' && type !== 'highlight' && type !== 'picture') {
     settings.name = type + '_' + formsNameCounters[type];
   }
   if (type === 'radio') settings.groupName = 'group_1';
@@ -1566,6 +1568,7 @@ function openNewFieldPopup(type) {
   inner.innerHTML  = buildPopupHTML(tempField);
   document.getElementById('forms-field-popup').classList.remove('hidden');
   if (type === 'dropdown' || type === 'list') wireOptionsListEvents(inner, tempField);
+  if (type === 'picture') wirePicturePopupEvents(inner, tempField);
   inner.querySelector('#popup-save-btn').addEventListener('click', saveFieldPopup);
   inner.querySelector('#popup-cancel-btn').addEventListener('click', closeFieldPopup);
 }
@@ -1587,7 +1590,7 @@ async function loadFormsFile(file) {
   formsSelId  = null;
   formsCurPage = 1;
   formsScales = [];
-  formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0, label:0, highlight:0 };
+  formsNameCounters = { text:0, checkbox:0, radio:0, dropdown:0, list:0, label:0, highlight:0, picture:0 };
 
   document.getElementById('forms-fname').textContent = file.name;
   document.getElementById('forms-dz-wrap').classList.add('hidden');
@@ -1876,6 +1879,37 @@ function renderFormsOverlay(pageNum) {
         badge.setAttribute('text-anchor', 'end');
         badge.textContent = 'label';
         g.appendChild(badge);
+      }
+    } else if (t === 'picture') {
+      // Hit rect (pointer-events active) for selection and drag
+      const hit = document.createElementNS(ns, 'rect');
+      hit.setAttribute('x', sx); hit.setAttribute('y', sy);
+      hit.setAttribute('width', sw); hit.setAttribute('height', sh);
+      hit.setAttribute('fill',   sel ? 'rgba(99,102,241,0.08)' : 'transparent');
+      hit.setAttribute('stroke', sel ? '#6366f1' : 'rgba(99,102,241,0.35)');
+      hit.setAttribute('stroke-width', sel ? '2.5' : '1');
+      hit.setAttribute('stroke-dasharray', sel ? 'none' : '4 2');
+      hit.setAttribute('cursor', 'move');
+      hit.dataset.id = f.id;
+      g.appendChild(hit);
+      if (s.src) {
+        const imgEl = document.createElementNS(ns, 'image');
+        imgEl.setAttribute('x', sx); imgEl.setAttribute('y', sy);
+        imgEl.setAttribute('width', sw); imgEl.setAttribute('height', sh);
+        imgEl.setAttribute('href', s.src);
+        imgEl.setAttribute('preserveAspectRatio', 'none');
+        imgEl.setAttribute('pointer-events', 'none'); // fall through to hit rect
+        g.appendChild(imgEl);
+      } else {
+        // Placeholder shown before an image is chosen
+        const ph = document.createElementNS(ns, 'text');
+        ph.setAttribute('x', sx + sw / 2); ph.setAttribute('y', sy + sh / 2);
+        ph.setAttribute('text-anchor', 'middle');
+        ph.setAttribute('dominant-baseline', 'middle');
+        ph.setAttribute('class', 'forms-field-placeholder');
+        ph.textContent = 'No image';
+        ph.setAttribute('pointer-events', 'none');
+        g.appendChild(ph);
       }
     } else {
       // Interactive field types — styled border rect
@@ -2284,7 +2318,7 @@ function closeTabOrderPanel() {
 function renderTabOrderList() {
   const list = document.getElementById('tab-order-list');
   list.innerHTML = '';
-  formsFields.forEach((f, idx) => {
+  formsFields.filter(f => f.type !== 'picture').forEach((f, idx) => {
     const item = document.createElement('div');
     item.className = 'tab-order-item';
     item.draggable = true;
@@ -2347,6 +2381,7 @@ function openFieldPopup(id) {
   document.getElementById('forms-field-popup').classList.remove('hidden');
   // Wire options list buttons for dropdown/list
   if (f.type === 'dropdown' || f.type === 'list') wireOptionsListEvents(inner, f);
+  if (f.type === 'picture') wirePicturePopupEvents(inner, f);
   inner.querySelector('#popup-save-btn').addEventListener('click', saveFieldPopup);
   inner.querySelector('#popup-cancel-btn').addEventListener('click', closeFieldPopup);
 }
@@ -2414,6 +2449,30 @@ function buildPopupHTML(f) {
       <div class="popup-footer">
         <button type="button" class="btn btn-outline btn-sm" id="popup-cancel-btn">Cancel</button>
         <button type="button" class="btn btn-primary btn-sm" id="popup-save-btn">Save</button>
+      </div>`;
+    return html;
+  }
+
+  if (t === 'picture') {
+    html += `
+      <div class="popup-field">
+        <label>Image File</label>
+        <label class="btn btn-outline btn-sm" for="pp-img-input" style="cursor:pointer;display:inline-block">
+          Choose Image…
+        </label>
+        <input type="file" id="pp-img-input" accept=".jpg,.jpeg,.png,.bmp" style="display:none">
+      </div>
+      <div class="popup-field" id="pp-preview-wrap" style="display:${s.src ? 'block' : 'none'}">
+        <label>Preview</label>
+        <img id="pp-preview" src="${escHtml(s.src || '')}" alt="preview"
+             style="max-width:100%;max-height:160px;border-radius:4px;border:1px solid var(--border)">
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 8px">
+        Supported: JPG, PNG (with transparency), BMP.
+      </p>
+      <div class="popup-footer">
+        <button type="button" class="btn btn-outline btn-sm" id="popup-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="popup-save-btn" ${s.src ? '' : 'disabled'}>Save</button>
       </div>`;
     return html;
   }
@@ -2517,6 +2576,48 @@ function wireRemoveOptBtn(row, inner) {
   });
 }
 
+function wirePicturePopupEvents(inner, f) {
+  const fileInput   = inner.querySelector('#pp-img-input');
+  const preview     = inner.querySelector('#pp-preview');
+  const previewWrap = inner.querySelector('#pp-preview-wrap');
+  const saveBtn     = inner.querySelector('#popup-save-btn');
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const isBmp = /\.bmp$/i.test(file.name) || file.type === 'image/bmp';
+    let dataUrl;
+    if (isBmp) {
+      // BMP → PNG via off-screen canvas (pdf-lib has no native BMP support)
+      dataUrl = await new Promise((resolve, reject) => {
+        const img = new Image();
+        const objUrl = URL.createObjectURL(file);
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          c.getContext('2d').drawImage(img, 0, 0);
+          URL.revokeObjectURL(objUrl);
+          resolve(c.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = objUrl;
+      });
+    } else {
+      // JPG/PNG: read bytes directly — no re-encode, preserves JPEG quality and PNG alpha
+      dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = e => resolve(e.target.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+    f.settings.src = dataUrl;
+    preview.src = dataUrl;
+    previewWrap.style.display = '';
+    saveBtn.disabled = false;
+  });
+}
+
 function saveFieldPopup() {
   // Determine whether this is a pending new field or an existing one
   const isPending = _pendingNewField !== null && _pendingNewField.id === formsEditingId;
@@ -2537,6 +2638,9 @@ function saveFieldPopup() {
     const hex = g('pp-bgcolor')?.value || '#ffeb3b';
     const op  = (parseInt(g('pp-opacity')?.value || '40', 10) / 100).toFixed(2);
     s.bgColor = hexToRgba(hex, op);
+  } else if (t === 'picture') {
+    if (!s.src) { alert('Please choose an image file first.'); return; }
+    // src already set on f.settings by wirePicturePopupEvents — nothing else to read
   } else {
     s.name  = (g('pp-name')?.value  || '').trim() || (t + '_' + f.id);
     s.label = (g('pp-label')?.value || '').trim();
@@ -2602,7 +2706,7 @@ function closeFieldPopup() {
 
 // ── Linked child labels ───────────────────────────────────────────────────────
 function maybeCreateChildLabel(f) {
-  if (f.type === 'label' || f.type === 'highlight') return;
+  if (f.type === 'label' || f.type === 'highlight' || f.type === 'picture') return;
   if (!f.settings.label || f.childLabelId != null) return;
   const [lW, lH] = FORMS_FIELD_SIZE.label;
   const child = {
@@ -2841,6 +2945,22 @@ async function runSaveForms() {
           F: 4,
         }));
         addAnnotToPage(pg, newDoc, hlAnnotRef);
+      } else if (f.type === 'picture') {
+        if (!s.src) continue;
+        const isPng = s.src.startsWith('data:image/png');
+        const b64   = s.src.slice(s.src.indexOf(',') + 1);
+        const bStr  = atob(b64);
+        const bytes = new Uint8Array(bStr.length);
+        for (let k = 0; k < bStr.length; k++) bytes[k] = bStr.charCodeAt(k);
+        let embeddedImg;
+        try {
+          embeddedImg = isPng ? await newDoc.embedPng(bytes) : await newDoc.embedJpg(bytes);
+        } catch (embedErr) {
+          console.warn('Picture embed failed for field', f.id, embedErr);
+          continue;
+        }
+        // pdf-lib drawImage uses bottom-left origin natively — same as f.x, f.y, f.w, f.h
+        pg.drawImage(embeddedImg, { x: f.x, y: f.y, width: f.w, height: f.h });
       }
     }
 
