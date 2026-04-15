@@ -144,6 +144,27 @@ header {
   color: var(--accent);
 }
 
+.snap-toggle {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.snap-toggle:hover { background: var(--surface-2); }
+.snap-toggle.snap-on {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ═══════════════════════════════════════════════
    VIEWS
    ═══════════════════════════════════════════════ */
@@ -701,6 +722,9 @@ input[type="number"] { -moz-appearance: textfield; }
   flex: 1;
   min-width: 0;
 }
+.toolbar-dz-wrap.hidden {
+	display: none;
+}
 .toolbar-dropzone {
   display: flex;
   align-items: center;
@@ -1109,6 +1133,54 @@ input[type="number"] { -moz-appearance: textfield; }
   r: 5;
 }
 .forms-handle:hover { fill: #6366f1; }
+
+/* New-item neon glow (clears on first move) */
+.forms-field-new .forms-field-body {
+  filter: drop-shadow(0 0 5px rgba(255, 100, 0, 0.9));
+  stroke: rgba(255, 100, 0, 0.9) !important;
+}
+.forms-field-placeholder {
+  fill: var(--text-muted, #aaa);
+  font-size: 9px;
+  pointer-events: none;
+  user-select: none;
+  dominant-baseline: hanging;
+}
+.forms-field-highlight-rect {
+  stroke: none;
+  cursor: move;
+}
+.forms-field-highlight-rect.selected {
+  stroke: rgba(255, 235, 59, 0.9);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 2;
+}
+.forms-field-label-text {
+  pointer-events: none;
+  user-select: none;
+  dominant-baseline: hanging;
+  cursor: move;
+}
+.forms-child-connector {
+  stroke: rgba(150, 150, 150, 0.5);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+.forms-snap-guide {
+  stroke: rgba(59, 130, 246, 0.7);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.popup-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 0;
+}
+.popup-row .popup-field {
+  flex: 1;
+  margin-bottom: 14px;
+}
 
 /* ═══════════════════════════════════════════════
    FORMS EDITOR — TAB ORDER PANEL

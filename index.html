@@ -313,20 +313,19 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
-        <div class="forms-tool-group" role="group" aria-label="Active tool">
-          <button class="forms-tool-btn active" data-tool="select">
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M4 2l16 10-8 1.5-3.5 6.5z"/></svg>
-            Select
-          </button>
-          <button class="forms-tool-btn" data-tool="text">Text</button>
+        <div class="forms-tool-group" role="group" aria-label="Add field">
+          <button class="forms-tool-btn" data-tool="text">Textbox</button>
           <button class="forms-tool-btn" data-tool="checkbox">Checkbox</button>
           <button class="forms-tool-btn" data-tool="radio">Radio</button>
           <button class="forms-tool-btn" data-tool="dropdown">Dropdown</button>
           <button class="forms-tool-btn" data-tool="list">List</button>
+          <button class="forms-tool-btn" data-tool="label">Label</button>
+          <button class="forms-tool-btn" data-tool="highlight">Highlight</button>
         </div>
         <div class="forms-toolbar-actions">
           <button type="button" class="btn btn-outline btn-sm" id="forms-delete-btn" disabled>Delete Field</button>
           <button type="button" class="btn btn-outline btn-sm" id="forms-tab-order-btn">Tab Order</button>
+          <button type="button" class="btn btn-outline btn-sm" id="snap-toggle">&#10003; Snap</button>
           <button type="button" class="btn btn-primary btn-sm" id="forms-save-btn">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Save PDF
@@ -357,6 +356,21 @@
       <div class="forms-popup-inner" id="forms-popup-inner"></div>
     </div>
 
+    <!-- Unicode font confirm dialog -->
+    <div class="forms-field-popup hidden" id="unicode-confirm-popup" role="dialog" aria-modal="true" aria-label="Unicode font prompt">
+      <div class="forms-popup-inner" style="max-width:360px">
+        <div class="popup-title">Unicode Characters Detected</div>
+        <p style="font-size:0.875rem;color:var(--text-muted);margin-bottom:20px;line-height:1.55">
+          Some label text contains characters that standard PDF fonts can't display.<br>
+          Embed a Unicode-compatible font and continue saving?
+        </p>
+        <div class="popup-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="unicode-confirm-no">No, use fallback</button>
+          <button type="button" class="btn btn-primary btn-sm" id="unicode-confirm-yes">Yes, embed font</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ═══════════════ LOADING OVERLAY ═══════════════ -->
@@ -373,6 +387,7 @@
   </div>
 
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://unpkg.com/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
