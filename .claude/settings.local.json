@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(node --check app.js)",
+      "Bash(npx --yes serve . -p 3456)"
+    ]
+  }
+}
